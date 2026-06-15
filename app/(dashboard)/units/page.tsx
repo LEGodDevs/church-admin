@@ -128,54 +128,137 @@ function TypePicker({ value, onChange }: { value: UnitType; onChange: (t: UnitTy
 
 // ── Tree Node ──────────────────────────────────────────────────────────────────
 
+const INDENT = 18; // px per depth level
+const ROW_H = 34;  // px row height — must match the rendered row height
+
 function TreeNode({
-  unit, depth, selectedId, onSelect, expandedIds, onToggle, searchQuery,
+  unit, depth, isLast, ancestorHasMore, selectedId, onSelect, expandedIds, onToggle, searchQuery,
 }: {
-  unit: OrgUnit; depth: number; selectedId: string | null;
-  onSelect: (u: OrgUnit) => void; expandedIds: Set<string>; onToggle: (id: string) => void; searchQuery: string;
+  unit: OrgUnit; depth: number; isLast: boolean; ancestorHasMore: boolean[];
+  selectedId: string | null; onSelect: (u: OrgUnit) => void;
+  expandedIds: Set<string>; onToggle: (id: string) => void; searchQuery: string;
 }) {
   const isExpanded = expandedIds.has(unit.id);
   const isSelected = selectedId === unit.id;
-  const color = TYPE_COLOR[unit.type];
 
   const matchesSelf = !searchQuery || unit.name.toLowerCase().includes(searchQuery.toLowerCase());
   const hasMatch = searchQuery ? flattenTree(unit).some(u => u.name.toLowerCase().includes(searchQuery.toLowerCase())) : true;
   if (!hasMatch) return null;
 
+  const visibleChildren = isExpanded
+    ? unit.children.filter(c => !searchQuery || flattenTree(c).some(u => u.name.toLowerCase().includes(searchQuery.toLowerCase())))
+    : [];
+
   return (
     <div>
+      {/* ── Row ── */}
       <div
-        className={`flex items-center gap-2 px-2 py-1.5 rounded-xl cursor-pointer transition-all ${isSelected ? "bg-slate-900" : "hover:bg-slate-100"}`}
-        style={{ paddingLeft: `${depth * 14 + 8}px` }}
+        className="relative flex items-center cursor-pointer select-none group"
+        style={{ height: ROW_H, paddingRight: 8 }}
         onClick={() => onSelect(unit)}
       >
-        {/* expand toggle */}
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); onToggle(unit.id); }}
-          className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${unit.children.length === 0 ? "opacity-0 pointer-events-none" : (isSelected ? "text-white/60" : "text-slate-400")}`}
-        >
-          {isExpanded ? "▾" : "▸"}
-        </button>
+        {/* ── Tree lines ── */}
+        {depth > 0 && (
+          <>
+            {/* Vertical lines for each ancestor level */}
+            {ancestorHasMore.map((hasMore, i) => hasMore ? (
+              <div
+                key={i}
+                className="absolute pointer-events-none"
+                style={{
+                  left: i * INDENT + 9,
+                  top: 0, bottom: 0,
+                  width: 1,
+                  background: "#e2e8f0",
+                }}
+              />
+            ) : null)}
 
-        <TypeBadge type={unit.type} size="sm" />
-
-        <span className={`flex-1 text-sm font-medium truncate ${matchesSelf && searchQuery ? "text-blue-600" : isSelected ? "text-white" : "text-slate-700"}`}>
-          {unit.name}
-        </span>
-
-        {unit.memberships.length > 0 && (
-          <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSelected ? "bg-white/20 text-white" : "bg-slate-100 text-slate-400"}`}>
-            {unit.memberships.length}
-          </span>
+            {/* Elbow connector for this node */}
+            {/* Vertical part (top half + continues down if not last) */}
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                left: (depth - 1) * INDENT + 9,
+                top: 0,
+                height: isLast ? ROW_H / 2 : ROW_H,
+                width: 1,
+                background: "#e2e8f0",
+              }}
+            />
+            {/* Horizontal part */}
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                left: (depth - 1) * INDENT + 9,
+                top: ROW_H / 2 - 0.5,
+                width: INDENT - 2,
+                height: 1,
+                background: "#e2e8f0",
+              }}
+            />
+          </>
         )}
+
+        {/* ── Row content ── */}
+        <div
+          className={`relative flex items-center gap-1.5 flex-1 mx-1 px-2 rounded-lg transition-all ${isSelected ? "bg-slate-900" : "group-hover:bg-slate-100"}`}
+          style={{ height: ROW_H - 6, marginLeft: depth * INDENT }}
+        >
+          {/* Expand toggle */}
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); if (unit.children.length) onToggle(unit.id); }}
+            className={`w-4 h-4 rounded flex items-center justify-center text-[10px] flex-shrink-0 transition-colors ${
+              unit.children.length === 0
+                ? "opacity-0 pointer-events-none"
+                : isSelected ? "text-white/50 hover:text-white" : "text-slate-400 hover:text-slate-600"
+            }`}
+          >
+            {isExpanded ? "▾" : "▸"}
+          </button>
+
+          {/* Type badge */}
+          <TypeBadge type={unit.type} size="sm" />
+
+          {/* Name */}
+          <span className={`flex-1 text-[13px] font-medium truncate ${
+            matchesSelf && searchQuery ? "text-blue-600" : isSelected ? "text-white" : "text-slate-700"
+          }`}>
+            {unit.name}
+          </span>
+
+          {/* Member count pill */}
+          {unit.memberships.length > 0 && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+              isSelected ? "bg-white/20 text-white/80" : "bg-slate-100 text-slate-400"
+            }`}>
+              {unit.memberships.length}
+            </span>
+          )}
+
+          {/* Child count indicator when collapsed */}
+          {!isExpanded && unit.children.length > 0 && (
+            <span className={`text-[10px] flex-shrink-0 ${isSelected ? "text-white/40" : "text-slate-300"}`}>
+              +{unit.children.length}
+            </span>
+          )}
+        </div>
       </div>
 
-      {isExpanded && unit.children.map(child => (
+      {/* ── Children ── */}
+      {visibleChildren.map((child, i) => (
         <TreeNode
-          key={child.id} unit={child} depth={depth + 1}
-          selectedId={selectedId} onSelect={onSelect}
-          expandedIds={expandedIds} onToggle={onToggle} searchQuery={searchQuery}
+          key={child.id}
+          unit={child}
+          depth={depth + 1}
+          isLast={i === visibleChildren.length - 1}
+          ancestorHasMore={[...ancestorHasMore, !isLast]}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          expandedIds={expandedIds}
+          onToggle={onToggle}
+          searchQuery={searchQuery}
         />
       ))}
     </div>
@@ -558,9 +641,11 @@ export default function UnitsPage() {
                 <button onClick={() => openCreate(null, "CHURCH")} className="text-xs text-blue-600 hover:underline">Create first unit</button>
               </div>
             ) : (
-              tree.map(root => (
+              tree.map((root, i) => (
                 <TreeNode
                   key={root.id} unit={root} depth={0}
+                  isLast={i === tree.length - 1}
+                  ancestorHasMore={[]}
                   selectedId={selectedId} onSelect={handleSelect}
                   expandedIds={expandedIds} onToggle={handleToggle}
                   searchQuery={searchQuery}
