@@ -8,19 +8,36 @@ import { FullPageLoader } from "@/components/ui/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { Giving } from "@/types/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth-store";
 
 const COLORS = ["#121D55", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EF4444"];
 
 export default function FinancesPage() {
+  const { user } = useAuthStore();
   const [givings, setGivings] = useState<Giving[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<Giving[]>("/givings")
-      .then(setGivings)
+    if (!user?.unitId) return;
+    apiFetch<{ recentRecords: Array<{ id: string; userId: string; amount: number; type: string; date: string; unitId: string; user: { firstName: string; lastName: string } }> }>(
+      `/finances/unit/${user.unitId}/summary?includeDescendants=true`
+    )
+      .then((res) =>
+        setGivings(
+          res.recentRecords.map((r) => ({
+            id: r.id,
+            memberId: r.userId,
+            memberName: `${r.user.firstName} ${r.user.lastName}`,
+            amount: r.amount,
+            type: r.type,
+            date: r.date,
+            unitId: r.unitId,
+          }))
+        )
+      )
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.unitId]);
 
   const total = givings.reduce((s, g) => s + g.amount, 0);
   const thisMonth = givings.filter((g) => {

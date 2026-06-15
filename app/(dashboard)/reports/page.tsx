@@ -6,26 +6,29 @@ import { FullPageLoader } from "@/components/ui/LoadingSpinner";
 import { apiFetch, apiPatch } from "@/lib/api";
 import { Report } from "@/types/api";
 import { formatDate } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth-store";
 
 export default function ReportsPage() {
+  const { user } = useAuthStore();
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "PENDING" | "REVIEWED">("ALL");
   const [reviewing, setReviewing] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<Report[]>("/reports")
+    if (!user?.unitId) return;
+    apiFetch<Report[]>(`/reports/incoming/${user.unitId}?includeDescendants=true`)
       .then(setReports)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.unitId]);
 
   const filtered = reports.filter((r) => filter === "ALL" || r.status === filter);
 
   const markReviewed = async (id: string) => {
     setReviewing(id);
     try {
-      await apiPatch(`/reports/${id}`, { status: "REVIEWED" });
+      await apiPatch(`/reports/${id}/review`, {});
       setReports((prev) => prev.map((r) => r.id === id ? { ...r, status: "REVIEWED" as const } : r));
     } catch {}
     setReviewing(null);

@@ -34,7 +34,7 @@ export default function UnitsPage() {
 
   useEffect(() => {
     if (!canView) return;
-    apiFetch<Unit[]>("/units")
+    apiFetch<Unit[]>("/organizational-units")
       .then(setUnits)
       .catch(() => {})
       .finally(() => setLoading(false));

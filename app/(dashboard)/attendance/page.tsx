@@ -8,19 +8,22 @@ import { FullPageLoader } from "@/components/ui/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { AttendanceSession } from "@/types/api";
 import { formatDate, formatPercent } from "@/lib/utils";
+import { useAuthStore } from "@/stores/auth-store";
 
 const PRIMARY = "#121D55";
 
 export default function AttendancePage() {
+  const { user } = useAuthStore();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<AttendanceSession[]>("/attendance/sessions")
+    if (!user?.unitId) return;
+    apiFetch<AttendanceSession[]>(`/attendance/unit/${user.unitId}/sessions?includeDescendants=true`)
       .then(setSessions)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.unitId]);
 
   const latest = sessions[sessions.length - 1];
   const avgPresent = sessions.length

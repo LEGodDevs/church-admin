@@ -26,12 +26,17 @@ export default function OverviewPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.unitId) return;
     Promise.all([
       apiFetch<Member[]>("/users").catch(() => [] as Member[]),
-      apiFetch<AttendanceSession[]>("/attendance/sessions").catch(() => [] as AttendanceSession[]),
-      apiFetch<Giving[]>("/givings").catch(() => [] as Giving[]),
-      apiFetch<Report[]>("/reports").catch(() => [] as Report[]),
+      apiFetch<AttendanceSession[]>(`/attendance/unit/${user.unitId}/sessions?includeDescendants=true`).catch(() => [] as AttendanceSession[]),
+      apiFetch<{ recentRecords: Array<{ id: string; userId: string; amount: number; type: string; date: string; unitId: string; user: { firstName: string; lastName: string } }> }>(
+        `/finances/unit/${user.unitId}/summary?includeDescendants=true`
+      ).then((res) => res.recentRecords.map((r) => ({
+        id: r.id, memberId: r.userId, memberName: `${r.user.firstName} ${r.user.lastName}`,
+        amount: r.amount, type: r.type, date: r.date, unitId: r.unitId,
+      } as Giving))).catch(() => [] as Giving[]),
+      apiFetch<Report[]>(`/reports/incoming/${user.unitId}?includeDescendants=true`).catch(() => [] as Report[]),
       apiFetch<Announcement[]>("/announcements").catch(() => [] as Announcement[]),
     ]).then(([m, s, g, r, a]) => {
       setMembers(m);
@@ -40,7 +45,7 @@ export default function OverviewPage() {
       setReports(r);
       setAnnouncements(a);
     }).finally(() => setLoading(false));
-  }, [user]);
+  }, [user?.unitId]);
 
   const totalMembers = members.length;
   const recentSession = sessions[sessions.length - 1];
