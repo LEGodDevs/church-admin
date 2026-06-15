@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
-import { LoginResponse } from "@/types/auth";
+import { LoginResponse, UserRole } from "@/types/auth";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -29,12 +29,29 @@ export default function LoginPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.message || "Invalid credentials");
       }
-      const data = (await res.json()) as LoginResponse;
+      const raw = await res.json();
 
-      const allowedRoles = ["BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD"];
-      if (!allowedRoles.includes(data.user.role)) {
+      const ROLE_PRIORITY: UserRole[] = ["BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD", "BC_HEAD", "MC_HEAD", "CELL_LEADER", "SHEPHERD", "MEMBER"];
+      const userRoles: UserRole[] = (raw.user.leaderships || []).map((l: { role: UserRole }) => l.role);
+      const role = ROLE_PRIORITY.find(r => userRoles.includes(r)) ?? "MEMBER";
+
+      const allowedRoles: UserRole[] = ["BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD"];
+      if (!allowedRoles.includes(role)) {
         throw new Error("This portal is for Branch Pastors and above. Please use the mobile app.");
       }
+
+      const data: LoginResponse = {
+        token: raw.token,
+        user: {
+          id: raw.user.id,
+          firstName: raw.user.firstName,
+          lastName: raw.user.lastName,
+          email: raw.user.email,
+          role,
+          unitId: raw.user.leaderships?.[0]?.unitId,
+          profileImage: raw.user.profilePic ?? undefined,
+        },
+      };
 
       // Set cookie for middleware
       document.cookie = `auth_token=${data.token}; path=/; max-age=86400`;
