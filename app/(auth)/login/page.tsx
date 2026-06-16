@@ -2,9 +2,39 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/auth-store";
-import { LoginResponse } from "@/types/auth";
+import { AuthUser, LoginResponse, UserRole } from "@/types/auth";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const ROLE_PRIORITY: Record<string, number> = {
+  BISHOP: 1,
+  ADMIN: 1,
+  ZONE_LEADER: 2,
+  BRANCH_HEAD: 3,
+  BC_HEAD: 4,
+  MC_HEAD: 5,
+  CELL_LEADER: 6,
+  SHEPHERD: 7,
+  MEMBER: 8,
+};
+
+interface RawLeadership {
+  role: string;
+  unitId: string;
+}
+
+interface RawLoginUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  profilePic?: string;
+  leaderships?: RawLeadership[];
+}
+
+function deriveLeadership(leaderships: RawLeadership[] = []): RawLeadership | undefined {
+  return leaderships.slice().sort((a, b) => (ROLE_PRIORITY[a.role] ?? 99) - (ROLE_PRIORITY[b.role] ?? 99))[0];
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -29,16 +59,42 @@ export default function LoginPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.message || "Invalid credentials");
       }
-      const data = (await res.json()) as LoginResponse;
+      const data = (await res.json()) as { token: string; user: RawLoginUser };
 
-      const allowedRoles = ["BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD"];
-      if (!allowedRoles.includes(data.user.role)) {
+      const leadership = deriveLeadership(data.user.leaderships);
+      const role = (leadership?.role ?? "MEMBER") as UserRole;
+
+      const allowedRoles: UserRole[] = ["BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD"];
+      if (!allowedRoles.includes(role)) {
         throw new Error("This portal is for Branch Pastors and above. Please use the mobile app.");
       }
 
+      let unitName: string | undefined;
+      if (leadership?.unitId) {
+        try {
+          const unit = await fetch(`${API}/organizational-units/${leadership.unitId}`, {
+            headers: { Authorization: `Bearer ${data.token}` },
+          }).then((r) => (r.ok ? r.json() : null));
+          unitName = unit?.name;
+        } catch {}
+      }
+
+      const authUser: AuthUser = {
+        id: data.user.id,
+        firstName: data.user.firstName,
+        lastName: data.user.lastName,
+        email: data.user.email,
+        role,
+        unitId: leadership?.unitId,
+        unitName,
+        profileImage: data.user.profilePic,
+      };
+
+      const loginResponse: LoginResponse = { token: data.token, user: authUser };
+
       // Set cookie for middleware
       document.cookie = `auth_token=${data.token}; path=/; max-age=86400`;
-      setAuth(data);
+      setAuth(loginResponse);
       router.replace("/overview");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");

@@ -6,47 +6,53 @@ import PageHeader from "@/components/ui/PageHeader";
 import StatCard from "@/components/ui/StatCard";
 import { FullPageLoader } from "@/components/ui/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
-import { Giving } from "@/types/api";
+import { useAuthStore } from "@/stores/auth-store";
+import { FinanceSummary } from "@/types/api";
 import { formatCurrency, formatDate } from "@/lib/utils";
 
 const COLORS = ["#121D55", "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EF4444"];
 
 export default function FinancesPage() {
-  const [givings, setGivings] = useState<Giving[]>([]);
+  const { user } = useAuthStore();
+  const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<Giving[]>("/givings")
-      .then(setGivings)
+    if (!user?.unitId) { setLoading(false); return; }
+    apiFetch<FinanceSummary>(`/finances/unit/${user.unitId}/summary?includeDescendants=true`)
+      .then(setSummary)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [user]);
 
-  const total = givings.reduce((s, g) => s + g.amount, 0);
-  const thisMonth = givings.filter((g) => {
-    const d = new Date(g.date);
+  const total = summary?.summary.total ?? 0;
+  const records = summary?.recentRecords ?? [];
+
+  const thisMonth = records.filter((r) => {
+    const d = new Date(r.date);
     const now = new Date();
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  }).reduce((s, g) => s + g.amount, 0);
+  }).reduce((s, r) => s + r.amount, 0);
 
-  const byType = givings.reduce<Record<string, number>>((acc, g) => {
-    acc[g.type] = (acc[g.type] ?? 0) + g.amount;
-    return acc;
-  }, {});
-  const byTypeChart = Object.entries(byType).map(([name, value]) => ({ name, value }));
+  const byTypeChart = summary
+    ? Object.entries(summary.summary.byType).map(([name, value]) => ({ name, value }))
+    : [];
 
-  const byMonth = givings.reduce<Record<string, number>>((acc, g) => {
-    const mo = new Date(g.date).toLocaleString("en", { month: "short", year: "2-digit" });
-    acc[mo] = (acc[mo] ?? 0) + g.amount;
+  const byMonth = records.reduce<Record<string, number>>((acc, r) => {
+    const mo = new Date(r.date).toLocaleString("en", { month: "short", year: "2-digit" });
+    acc[mo] = (acc[mo] ?? 0) + r.amount;
     return acc;
   }, {});
   const byMonthChart = Object.entries(byMonth).slice(-6).map(([name, value]) => ({ name, value }));
+
+  const memberName = (r: FinanceSummary["recentRecords"][number]) =>
+    r.user ? `${r.user.firstName} ${r.user.lastName}` : "—";
 
   return (
     <div className="flex flex-col flex-1">
       <Header title="Finances" subtitle="Unit giving records" />
       <div className="flex-1 p-6 overflow-y-auto">
-        <PageHeader title="Finances" subtitle={`${givings.length} giving records`} />
+        <PageHeader title="Finances" subtitle={`${records.length} giving record${records.length !== 1 ? "s" : ""}`} />
 
         {loading ? <FullPageLoader /> : (
           <>
@@ -54,7 +60,7 @@ export default function FinancesPage() {
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               <StatCard label="Total Givings" value={formatCurrency(total)} icon="💰" color="#121D55" />
               <StatCard label="This Month" value={formatCurrency(thisMonth)} icon="📅" color="#10B981" />
-              <StatCard label="Giving Types" value={Object.keys(byType).length} icon="🗂️" color="#F59E0B" />
+              <StatCard label="Giving Types" value={byTypeChart.length} icon="🗂️" color="#F59E0B" />
             </div>
 
             {/* Charts */}
@@ -109,24 +115,25 @@ export default function FinancesPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100">
-                    {["Member", "Type", "Amount", "Date"].map((h) => (
+                    {["Member", "Type", "Amount", "Unit", "Date"].map((h) => (
                       <th key={h} className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {givings.slice().reverse().slice(0, 20).map((g) => (
-                    <tr key={g.id} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="px-5 py-3 text-sm text-slate-700">{g.memberName ?? "—"}</td>
+                  {records.slice(0, 20).map((r) => (
+                    <tr key={r.id} className="border-b border-slate-50 hover:bg-slate-50">
+                      <td className="px-5 py-3 text-sm text-slate-700">{memberName(r)}</td>
                       <td className="px-5 py-3">
-                        <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs font-medium">{g.type}</span>
+                        <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs font-medium">{r.type}</span>
                       </td>
-                      <td className="px-5 py-3 text-sm font-semibold text-slate-800">{formatCurrency(g.amount)}</td>
-                      <td className="px-5 py-3 text-sm text-slate-400">{formatDate(g.date)}</td>
+                      <td className="px-5 py-3 text-sm font-semibold text-slate-800">{formatCurrency(r.amount)}</td>
+                      <td className="px-5 py-3 text-sm text-slate-500">{r.unit?.name ?? "—"}</td>
+                      <td className="px-5 py-3 text-sm text-slate-400">{formatDate(r.date)}</td>
                     </tr>
                   ))}
-                  {givings.length === 0 && (
-                    <tr><td colSpan={4} className="px-5 py-12 text-center text-slate-300 text-sm">No giving records yet</td></tr>
+                  {records.length === 0 && (
+                    <tr><td colSpan={5} className="px-5 py-12 text-center text-slate-300 text-sm">No giving records yet</td></tr>
                   )}
                 </tbody>
               </table>

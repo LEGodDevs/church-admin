@@ -4,30 +4,43 @@ export interface Member {
   lastName: string;
   email?: string;
   phone?: string;
-  role: string;
-  unitId?: string;
-  unitName?: string;
-  profileImage?: string;
+  profilePic?: string;
   createdAt: string;
 }
+
+export type UnitType = "CHURCH" | "ZONE" | "BRANCH" | "MC" | "BC" | "CELL" | "SHEPHERD";
 
 export interface Unit {
   id: string;
   name: string;
-  type: "ZONE" | "BRANCH" | "BC" | "MC" | "CELL";
+  type: UnitType;
   parentId?: string;
-  leaderId?: string;
-  memberCount?: number;
+  parent?: { id: string; name: string; type: UnitType };
+  children?: Unit[];
+  memberships?: { id: string }[];
+  leaderships?: { role: string; user?: { firstName: string; lastName: string } }[];
 }
 
-export interface AttendanceSession {
+export interface EventAttendee {
+  status: string;
+  user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    profilePic?: string;
+  };
+}
+
+export interface AttendanceEvent {
   id: string;
+  title: string;
+  description: string;
   date: string;
-  type: string;
-  totalPresent: number;
-  totalAbsent: number;
-  unitId: string;
-  unitName?: string;
+  status: string;
+  createdByUnitId: string;
+  createdByUnit?: { name: string; type: string };
+  _count?: { attendees: number };
+  attendees?: EventAttendee[];
 }
 
 export interface Report {
@@ -35,11 +48,13 @@ export interface Report {
   title: string;
   content: string;
   authorId: string;
-  authorName?: string;
+  author?: { id: string; firstName: string; lastName: string };
   unitId: string;
-  unitName?: string;
-  status: "PENDING" | "REVIEWED";
-  createdAt: string;
+  unit?: { id: string; name: string; type: string };
+  status: "submitted" | "reviewed";
+  dueDate?: string;
+  submittedAt?: string;
+  reviewedAt?: string;
 }
 
 export interface Announcement {
@@ -52,35 +67,43 @@ export interface Announcement {
   createdAt: string;
 }
 
-export interface Giving {
+export type FinanceType = "Tithe" | "Partnership" | "Seed" | "Special";
+
+export interface Finance {
   id: string;
-  memberId: string;
-  memberName?: string;
   amount: number;
-  type: string;
   date: string;
+  type: FinanceType;
+  userId: string;
+  user?: { id: string; firstName: string; lastName: string; profilePic?: string };
   unitId: string;
+  unit?: { id: string; name: string; type: string };
 }
 
-export interface DashboardStats {
+export interface FinanceSummary {
+  unitId: string;
+  summary: { total: number; byType: Record<string, number> };
+  recentRecords: Finance[];
+}
+
+export interface AdminDashboard {
   totalMembers: number;
-  presentThisWeek: number;
-  absentThisWeek: number;
+  totalZones: number;
+  totalBranches: number;
+  monthlyGiving: number;
   attendanceRate: number;
-  totalGivings: number;
-  pendingReports: number;
   newMembersThisMonth: number;
-  activeUnits: number;
+  firstTimersThisMonth: number;
 }
 
-export interface ChartPoint {
-  label: string;
-  value: number;
-}
-
-export interface PaginatedResponse<T> {
-  data: T[];
-  total: number;
-  page: number;
-  limit: number;
+export interface GeneralDashboard {
+  totalMembers: number;
+  totalFinances: number;
+  totalSoulsWon: number;
+  totalPeopleReached: number;
+  upcomingEvents: number;
+  childUnitCount: number;
+  totalCellGroups: number;
+  totalSubUnits: number;
+  unitType: string;
 }
