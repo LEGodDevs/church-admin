@@ -67,7 +67,7 @@ export interface Announcement {
   createdAt: string;
 }
 
-export type FinanceType = "Tithe" | "Partnership" | "Seed" | "Special";
+export type FinanceType = "Tithe" | "Partnership" | "Seed" | "Special" | "Offering";
 
 export interface Finance {
   id: string;
