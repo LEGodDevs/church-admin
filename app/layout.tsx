@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "LC Church Admin",
-  description: "Church leadership administration portal",
+  title: "LE Church · Admin Console",
+  description: "Living Expressions Church — leadership administration console",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

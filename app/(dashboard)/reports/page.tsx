@@ -1,119 +1,108 @@
 "use client";
-import { useEffect, useState } from "react";
-import Header from "@/components/layout/Header";
-import PageHeader from "@/components/ui/PageHeader";
-import { FullPageLoader } from "@/components/ui/LoadingSpinner";
-import { apiFetch, apiPatch } from "@/lib/api";
-import { useAuthStore } from "@/stores/auth-store";
-import { Report } from "@/types/api";
-import { formatDate } from "@/lib/utils";
+import { useCallback, useMemo, useState } from "react";
+import { Page } from "@/components/ui/Page";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Tabs } from "@/components/ui/Tabs";
+import { Modal } from "@/components/ui/Modal";
+import { LoadingBlock, ErrorBlock, EmptyState } from "@/components/ui/States";
+import { api } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
+import { useScope } from "@/hooks/useScope";
+import { dateShort } from "@/lib/format";
+import type { Report } from "@/types/api";
 
-type Filter = "ALL" | "submitted" | "reviewed";
+type Tab = "all" | "submitted" | "reviewed";
 
 export default function ReportsPage() {
-  const { user } = useAuthStore();
-  const [reports, setReports] = useState<Report[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>("ALL");
-  const [reviewing, setReviewing] = useState<string | null>(null);
+  const { unitId } = useScope();
+  const { data, loading, error, refetch } = useApi(
+    useCallback(() => (unitId ? api.incomingReports(unitId) : Promise.reject(new Error("No unit"))), [unitId]),
+    [unitId]
+  );
+  const [tab, setTab] = useState<Tab>("all");
+  const [selected, setSelected] = useState<Report | null>(null);
+  const [reviewing, setReviewing] = useState(false);
 
-  useEffect(() => {
-    if (!user?.unitId) { setLoading(false); return; }
-    apiFetch<Report[]>(`/reports/incoming/${user.unitId}?includeDescendants=true`)
-      .then(setReports)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [user]);
+  const reports = useMemo(() => data ?? [], [data]);
+  const filtered = tab === "all" ? reports : reports.filter((r) => r.status === tab);
+  const submitted = reports.filter((r) => r.status === "submitted").length;
 
-  const filtered = reports.filter((r) => filter === "ALL" || r.status === filter);
-  const pendingCount = reports.filter((r) => r.status === "submitted").length;
-
-  const markReviewed = async (id: string) => {
-    setReviewing(id);
+  const review = async (r: Report) => {
+    setReviewing(true);
     try {
-      await apiPatch(`/reports/${id}/review`, {});
-      setReports((prev) => prev.map((r) => r.id === id ? { ...r, status: "reviewed" as const } : r));
-    } catch {}
-    setReviewing(null);
+      await api.reviewReport(r.id);
+      setSelected(null);
+      refetch();
+    } finally {
+      setReviewing(false);
+    }
   };
 
-  const authorName = (r: Report) =>
-    r.author ? `${r.author.firstName} ${r.author.lastName}` : "Unknown";
-
-  const reportDate = (r: Report) => r.submittedAt ?? r.dueDate ?? "";
-
   return (
-    <div className="flex flex-col flex-1">
-      <Header title="Reports" subtitle="Incoming unit reports" />
-      <div className="flex-1 p-6 overflow-y-auto">
-        <PageHeader
-          title="Reports"
-          subtitle={pendingCount > 0 ? `${pendingCount} pending review` : "All caught up"}
-        />
-
-        {/* Filter tabs */}
-        <div className="flex gap-2 mb-5">
-          {([["ALL", "All"], ["submitted", `Pending (${pendingCount})`], ["reviewed", "Reviewed"]] as const).map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => setFilter(val)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
-                filter === val
-                  ? "text-white"
-                  : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50"
-              }`}
-              style={filter === val ? { background: "#121D55" } : {}}
-            >
-              {label}
-            </button>
-          ))}
+    <Page title="Reports" subtitle={`${reports.length} incoming · ${submitted} awaiting review`}>
+      <Card>
+        <div className="mb-4">
+          <Tabs
+            active={tab}
+            onChange={setTab}
+            tabs={[
+              { key: "all", label: "All", count: reports.length },
+              { key: "submitted", label: "Awaiting", count: submitted },
+              { key: "reviewed", label: "Reviewed", count: reports.length - submitted },
+            ]}
+          />
         </div>
-
-        {loading ? <FullPageLoader /> : (
+        {loading ? (
+          <LoadingBlock />
+        ) : error ? (
+          <ErrorBlock message={error} onRetry={refetch} />
+        ) : filtered.length === 0 ? (
+          <EmptyState icon="📋" title="No reports here" />
+        ) : (
           <div className="space-y-3">
-            {filtered.map((report) => (
-              <div key={report.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className={`w-2 h-2 rounded-full ${report.status === "submitted" ? "bg-amber-400" : "bg-emerald-400"}`} />
-                      <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">
-                        {report.status === "submitted" ? "Pending" : "Reviewed"}
-                      </span>
-                      {report.unit?.name && (
-                        <>
-                          <span className="text-slate-200">·</span>
-                          <span className="text-xs text-slate-400">{report.unit.name}</span>
-                        </>
-                      )}
-                    </div>
-                    <h3 className="text-sm font-semibold text-slate-800 mb-1">{report.title}</h3>
-                    <p className="text-sm text-slate-500 leading-relaxed line-clamp-2">{report.content}</p>
-                    <p className="text-xs text-slate-300 mt-2">
-                      By {authorName(report)}{reportDate(report) ? ` · ${formatDate(reportDate(report))}` : ""}
-                    </p>
-                  </div>
-                  {report.status === "submitted" && (
-                    <button
-                      onClick={() => markReviewed(report.id)}
-                      disabled={reviewing === report.id}
-                      className="px-4 py-2 rounded-xl text-xs font-semibold text-white transition-opacity disabled:opacity-60 flex-shrink-0"
-                      style={{ background: "#121D55" }}
-                    >
-                      {reviewing === report.id ? "Saving…" : "Mark Reviewed"}
-                    </button>
-                  )}
+            {filtered.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setSelected(r)}
+                className="w-full text-left flex items-start justify-between gap-4 p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50 transition-colors"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-800 truncate">{r.title}</p>
+                  <p className="text-sm text-slate-500 line-clamp-1 mt-0.5">{r.content}</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {r.unit?.name ?? "—"}
+                    {r.author && ` · ${r.author.firstName} ${r.author.lastName}`}
+                    {` · ${dateShort(r.submittedAt)}`}
+                  </p>
                 </div>
-              </div>
+                <Badge tone={r.status === "reviewed" ? "green" : "amber"}>{r.status}</Badge>
+              </button>
             ))}
-            {filtered.length === 0 && (
-              <div className="py-16 text-center text-slate-300 text-sm">
-                {filter === "submitted" ? "No pending reports" : "No reports found"}
-              </div>
-            )}
           </div>
         )}
-      </div>
-    </div>
+      </Card>
+
+      {selected && (
+        <Modal open onClose={() => setSelected(null)} title={selected.title} width={560}>
+          <div className="flex items-center gap-2 mb-4 text-sm text-slate-500">
+            <Badge tone={selected.status === "reviewed" ? "green" : "amber"}>{selected.status}</Badge>
+            <span>{selected.unit?.name}</span>
+            {selected.author && <span>· {selected.author.firstName} {selected.author.lastName}</span>}
+            <span>· {dateShort(selected.submittedAt)}</span>
+          </div>
+          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{selected.content}</p>
+          {selected.status === "submitted" && (
+            <button
+              onClick={() => review(selected)}
+              disabled={reviewing}
+              className="mt-5 w-full py-2.5 rounded-xl bg-[#121D55] text-white text-sm font-medium hover:bg-[#1e2f7a] disabled:opacity-60"
+            >
+              {reviewing ? "Marking…" : "Mark as reviewed"}
+            </button>
+          )}
+        </Modal>
+      )}
+    </Page>
   );
 }

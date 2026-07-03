@@ -1,109 +1,128 @@
 "use client";
-import { useEffect, useState } from "react";
-import Header from "@/components/layout/Header";
-import PageHeader from "@/components/ui/PageHeader";
-import { FullPageLoader } from "@/components/ui/LoadingSpinner";
-import { apiFetch } from "@/lib/api";
-import { Member } from "@/types/api";
-import { formatDate, getInitials } from "@/lib/utils";
+import { useCallback, useMemo, useState } from "react";
+import { Page } from "@/components/ui/Page";
+import { Card } from "@/components/ui/Card";
+import { Avatar } from "@/components/ui/Avatar";
+import { Badge, ROLE_TONE } from "@/components/ui/Badge";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Modal } from "@/components/ui/Modal";
+import { LoadingBlock, ErrorBlock } from "@/components/ui/States";
+import { api } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
+import { ROLE_LABELS } from "@/types/auth";
+import { dateShort } from "@/lib/format";
+import type { Member } from "@/types/api";
 
-const PAGE_SIZE = 20;
+function roleOf(m: Member): string | null {
+  return m.leaderships?.[0]?.role ?? null;
+}
 
 export default function MembersPage() {
-  const [members, setMembers] = useState<Member[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
+  const { data, loading, error, refetch } = useApi(useCallback(() => api.users(), []), []);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState<Member | null>(null);
 
-  useEffect(() => {
-    apiFetch<Member[]>("/users")
-      .then(setMembers)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+  const rows = useMemo(() => {
+    const list = data ?? [];
+    const query = q.trim().toLowerCase();
+    if (!query) return list;
+    return list.filter(
+      (m) =>
+        `${m.firstName} ${m.lastName}`.toLowerCase().includes(query) ||
+        (m.email ?? "").toLowerCase().includes(query) ||
+        (m.phoneNumber ?? "").includes(query)
+    );
+  }, [data, q]);
 
-  const filtered = members.filter((m) => {
-    const name = `${m.firstName} ${m.lastName}`.toLowerCase();
-    return !search || name.includes(search.toLowerCase()) || m.email?.toLowerCase().includes(search.toLowerCase());
-  });
+  const leaders = (data ?? []).filter((m) => roleOf(m)).length;
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const columns: Column<Member>[] = [
+    {
+      key: "name",
+      header: "Member",
+      render: (m) => (
+        <div className="flex items-center gap-3">
+          <Avatar name={`${m.firstName} ${m.lastName}`} src={m.profilePic} size={34} />
+          <div>
+            <p className="font-medium text-slate-800">{m.firstName} {m.lastName}</p>
+            <p className="text-xs text-slate-400">{m.email ?? "—"}</p>
+          </div>
+        </div>
+      ),
+    },
+    { key: "phone", header: "Phone", render: (m) => <span className="text-slate-500">{m.phoneNumber ?? "—"}</span> },
+    {
+      key: "role",
+      header: "Role",
+      render: (m) => {
+        const r = roleOf(m);
+        return r ? (
+          <Badge tone={ROLE_TONE[r] ?? "slate"}>{ROLE_LABELS[r as keyof typeof ROLE_LABELS] ?? r}</Badge>
+        ) : (
+          <Badge tone="slate">Member</Badge>
+        );
+      },
+    },
+    { key: "occupation", header: "Occupation", render: (m) => <span className="text-slate-500">{m.occupation ?? "—"}</span> },
+  ];
 
   return (
-    <div className="flex flex-col flex-1">
-      <Header title="Members" subtitle="All church members in your scope" />
-      <div className="flex-1 p-6 overflow-y-auto">
-        <PageHeader title="Members" subtitle={`${filtered.length} member${filtered.length !== 1 ? "s" : ""}`} />
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-3 mb-5">
+    <Page title="Members" subtitle={`${data?.length ?? 0} people · ${leaders} leaders`}>
+      <Card>
+        <div className="mb-4">
           <input
-            type="text"
-            placeholder="Search by name or email…"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="flex-1 min-w-48 px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-700 outline-none focus:border-blue-400"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by name, email or phone…"
+            className="w-full max-w-md px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:border-[#121D55] focus:ring-2 focus:ring-[#121D55]/10"
           />
         </div>
-
-        {loading ? <FullPageLoader /> : (
-          <>
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3.5">Member</th>
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3.5 hidden md:table-cell">Phone</th>
-                    <th className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3.5 hidden xl:table-cell">Joined</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paged.map((m) => (
-                    <tr key={m.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 flex-shrink-0">
-                            {getInitials(m.firstName, m.lastName)}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-slate-700">{m.firstName} {m.lastName}</p>
-                            {m.email && <p className="text-xs text-slate-400">{m.email}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 hidden md:table-cell text-sm text-slate-500">{m.phone ?? "—"}</td>
-                      <td className="px-5 py-3.5 hidden xl:table-cell text-sm text-slate-400">{formatDate(m.createdAt)}</td>
-                    </tr>
-                  ))}
-                  {paged.length === 0 && (
-                    <tr><td colSpan={3} className="px-5 py-12 text-center text-slate-300 text-sm">No members found</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-4">
-                <p className="text-sm text-slate-400">
-                  Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
-                </p>
-                <div className="flex gap-2">
-                  <button onClick={() => setPage((p) => p - 1)} disabled={page === 1}
-                    className="px-3 py-1.5 rounded-lg text-sm border border-slate-200 disabled:opacity-40 hover:bg-slate-50">
-                    Prev
-                  </button>
-                  <button onClick={() => setPage((p) => p + 1)} disabled={page === totalPages}
-                    className="px-3 py-1.5 rounded-lg text-sm border border-slate-200 disabled:opacity-40 hover:bg-slate-50">
-                    Next
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
+        {loading ? (
+          <LoadingBlock />
+        ) : error ? (
+          <ErrorBlock message={error} onRetry={refetch} />
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            keyField={(m) => m.id}
+            onRowClick={setSelected}
+            emptyIcon="👥"
+            emptyTitle="No members found"
+          />
         )}
-      </div>
-    </div>
+      </Card>
+
+      {selected && (
+        <Modal open onClose={() => setSelected(null)} title="Member details">
+          <div className="flex items-center gap-4 mb-5">
+            <Avatar name={`${selected.firstName} ${selected.lastName}`} src={selected.profilePic} size={56} />
+            <div>
+              <p className="text-lg font-semibold text-slate-800">{selected.firstName} {selected.lastName}</p>
+              {roleOf(selected) && (
+                <Badge tone={ROLE_TONE[roleOf(selected)!] ?? "slate"}>
+                  {ROLE_LABELS[roleOf(selected) as keyof typeof ROLE_LABELS] ?? roleOf(selected)}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            {([
+              ["Email", selected.email],
+              ["Phone", selected.phoneNumber],
+              ["Occupation", selected.occupation],
+              ["Marital status", selected.maritalStatus],
+              ["Date of birth", selected.dob ? dateShort(selected.dob) : null],
+              ["Units", selected.memberships?.map((m) => m.unit?.name).filter(Boolean).join(", ") || null],
+            ] as [string, string | null | undefined][]).map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-xs text-slate-400">{label}</dt>
+                <dd className="text-slate-700 font-medium">{value || "—"}</dd>
+              </div>
+            ))}
+          </dl>
+        </Modal>
+      )}
+    </Page>
   );
 }

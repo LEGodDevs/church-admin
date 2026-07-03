@@ -1,145 +1,132 @@
 "use client";
-import { useEffect, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import Header from "@/components/layout/Header";
-import PageHeader from "@/components/ui/PageHeader";
+import { useCallback, useMemo, useState } from "react";
+import { Page } from "@/components/ui/Page";
+import { Card, CardHeader } from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
-import { FullPageLoader } from "@/components/ui/LoadingSpinner";
-import { apiFetch } from "@/lib/api";
-import { useAuthStore } from "@/stores/auth-store";
-import { AttendanceEvent } from "@/types/api";
-import { formatDate, formatPercent } from "@/lib/utils";
-
-const PRIMARY = "#121D55";
+import { Badge } from "@/components/ui/Badge";
+import { Avatar } from "@/components/ui/Avatar";
+import { DataTable, type Column } from "@/components/ui/DataTable";
+import { Modal } from "@/components/ui/Modal";
+import { LoadingBlock, ErrorBlock, EmptyState } from "@/components/ui/States";
+import { BarSeries, ProgressBar } from "@/components/charts/Charts";
+import { api } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
+import { useScope } from "@/hooks/useScope";
+import { dateShort } from "@/lib/format";
+import { attendanceTrend, presentCount, attendedRate } from "@/lib/analytics";
+import type { AttendanceEvent } from "@/types/api";
 
 export default function AttendancePage() {
-  const { user } = useAuthStore();
-  const [sessions, setSessions] = useState<AttendanceEvent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { unitId } = useScope();
+  const { data, loading, error, refetch } = useApi(
+    useCallback(() => (unitId ? api.unitSessions(unitId) : Promise.reject(new Error("No unit"))), [unitId]),
+    [unitId]
+  );
+  const [selected, setSelected] = useState<AttendanceEvent | null>(null);
 
-  useEffect(() => {
-    if (!user?.unitId) { setLoading(false); return; }
-    apiFetch<AttendanceEvent[]>(`/attendance/unit/${user.unitId}/sessions?includeDescendants=true`)
-      .then(setSessions)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [user]);
+  const sessions = useMemo(
+    () => (data ?? []).slice().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [data]
+  );
+  const trend = useMemo(() => attendanceTrend(sessions), [sessions]);
 
-  const getPresent = (s: AttendanceEvent) =>
-    (s.attendees ?? []).filter((a) => a.status === "Attended").length;
-  const getTotal = (s: AttendanceEvent) => s._count?.attendees ?? (s.attendees?.length ?? 0);
+  const totalPresent = sessions.reduce((s, e) => s + presentCount(e), 0);
+  const totalMarked = sessions.reduce((s, e) => s + (e.attendees?.length ?? 0), 0);
+  const overallRate = totalMarked ? Math.round((totalPresent / totalMarked) * 100) : 0;
+  const openCount = sessions.filter((s) => s.status === "OPEN").length;
 
-  const latest = sessions[0];
-  const latestPresent = latest ? getPresent(latest) : 0;
-  const latestTotal = latest ? getTotal(latest) : 0;
-
-  const avgRate = sessions.length
-    ? sessions.reduce((sum, s) => {
-        const total = getTotal(s);
-        return sum + (total > 0 ? getPresent(s) / total : 0);
-      }, 0) / sessions.length * 100
-    : 0;
-
-  const avgPresent = sessions.length
-    ? Math.round(sessions.reduce((sum, s) => sum + getPresent(s), 0) / sessions.length)
-    : 0;
-
-  const chartData = sessions.slice(0, 8).slice().reverse().map((s) => {
-    const present = getPresent(s);
-    const total = getTotal(s);
-    return {
-      name: formatDate(s.date).slice(0, 6),
-      Present: present,
-      Absent: Math.max(total - present, 0),
-      Rate: total > 0 ? Math.round((present / total) * 100) : 0,
-    };
-  });
+  const columns: Column<AttendanceEvent>[] = [
+    {
+      key: "title",
+      header: "Session",
+      render: (e) => (
+        <div>
+          <p className="font-medium text-slate-800">{e.title}</p>
+          <p className="text-xs text-slate-400">{e.category?.name ?? e.createdByUnit?.name ?? "—"}</p>
+        </div>
+      ),
+    },
+    { key: "date", header: "Date", render: (e) => <span className="text-slate-500">{dateShort(e.date)}</span> },
+    {
+      key: "present",
+      header: "Present",
+      align: "center",
+      render: (e) => (
+        <span className="font-semibold text-slate-800">
+          {presentCount(e)}
+          <span className="text-slate-400 font-normal"> / {e.attendees?.length ?? 0}</span>
+        </span>
+      ),
+    },
+    {
+      key: "rate",
+      header: "Rate",
+      width: "140px",
+      render: (e) => (
+        <div className="flex items-center gap-2">
+          <div className="flex-1"><ProgressBar value={attendedRate(e)} color="#7c3aed" /></div>
+          <span className="text-xs text-slate-500 w-9 text-right">{attendedRate(e)}%</span>
+        </div>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "center",
+      render: (e) => <Badge tone={e.status === "OPEN" ? "green" : "slate"}>{e.status === "OPEN" ? "Open" : "Closed"}</Badge>,
+    },
+  ];
 
   return (
-    <div className="flex flex-col flex-1">
-      <Header title="Attendance" subtitle="Session records and trends" />
-      <div className="flex-1 p-6 overflow-y-auto">
-        <PageHeader title="Attendance Records" subtitle={`${sessions.length} session${sessions.length !== 1 ? "s" : ""} recorded`} />
+    <Page title="Attendance" subtitle="Session-by-session attendance across your units">
+      {loading ? (
+        <Card><LoadingBlock /></Card>
+      ) : error ? (
+        <Card><ErrorBlock message={error} onRetry={refetch} /></Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+            <StatCard label="Sessions" value={sessions.length} icon="📋" color="#121D55" />
+            <StatCard label="Overall rate" value={`${overallRate}%`} icon="✅" color="#7c3aed" />
+            <StatCard label="Total present" value={totalPresent} icon="🙋" color="#059669" />
+            <StatCard label="Open sessions" value={openCount} icon="🔓" color="#d97706" />
+          </div>
 
-        {loading ? <FullPageLoader /> : (
-          <>
-            {/* Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <StatCard label="Total Sessions" value={sessions.length} icon="📅" color={PRIMARY} />
-              <StatCard label="Last Session Present" value={latestPresent} icon="✅" color="#10B981"
-                delta={latestTotal > 0 ? `of ${latestTotal} total` : undefined} deltaPositive />
-              <StatCard label="Avg. Attendance" value={avgPresent} icon="👥" color="#3B82F6" />
-              <StatCard label="Avg. Rate" value={formatPercent(avgRate)} icon="📈" color="#F59E0B"
-                delta={avgRate >= 70 ? "Healthy" : "Low"} deltaPositive={avgRate >= 70} />
-            </div>
+          <Card className="mb-5">
+            <CardHeader title="Attendance rate trend" subtitle="Present share by month" />
+            {trend.some((d) => d.rate > 0) ? (
+              <BarSeries data={trend} xKey="month" yKey="rate" color="#7c3aed" format={(v) => `${v}%`} />
+            ) : (
+              <EmptyState icon="🪑" title="No attendance data yet" />
+            )}
+          </Card>
 
-            {/* Chart */}
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-6">
-              <p className="font-semibold text-slate-700 mb-4">Attendance per Session (Last 8)</p>
-              {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                    <Tooltip />
-                    <Bar dataKey="Present" fill={PRIMARY} radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="Absent" fill="#FCA5A5" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-48 flex items-center justify-center text-slate-300 text-sm">No data yet</div>
-              )}
-            </div>
+          <Card>
+            <CardHeader title="Sessions" subtitle={`${sessions.length} total`} />
+            <DataTable columns={columns} rows={sessions} keyField={(e) => e.id} onRowClick={setSelected} emptyIcon="📋" emptyTitle="No sessions" />
+          </Card>
+        </>
+      )}
 
-            {/* Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    {["Date", "Title", "Unit", "Present", "Total", "Rate"].map((h) => (
-                      <th key={h} className="text-left text-xs font-semibold text-slate-400 uppercase tracking-wide px-5 py-3.5">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((s) => {
-                    const present = getPresent(s);
-                    const total = getTotal(s);
-                    const rate = total > 0 ? Math.round((present / total) * 100) : 0;
-                    return (
-                      <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50">
-                        <td className="px-5 py-3.5 text-sm text-slate-700 whitespace-nowrap">{formatDate(s.date)}</td>
-                        <td className="px-5 py-3.5 text-sm text-slate-700 max-w-48 truncate">{s.title}</td>
-                        <td className="px-5 py-3.5">
-                          {s.createdByUnit && (
-                            <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs font-medium">
-                              {s.createdByUnit.name}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-5 py-3.5 text-sm font-semibold text-emerald-600">{present}</td>
-                        <td className="px-5 py-3.5 text-sm text-slate-500">{total}</td>
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden" style={{ maxWidth: 60 }}>
-                              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${rate}%` }} />
-                            </div>
-                            <span className="text-xs text-slate-500">{rate}%</span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {sessions.length === 0 && (
-                    <tr><td colSpan={6} className="px-5 py-12 text-center text-slate-300 text-sm">No sessions recorded yet</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+      {selected && (
+        <Modal open onClose={() => setSelected(null)} title={selected.title} width={480}>
+          <div className="flex items-center gap-2 mb-4 text-sm text-slate-500">
+            <Badge tone={selected.status === "OPEN" ? "green" : "slate"}>{selected.status}</Badge>
+            <span>{dateShort(selected.date)}</span>
+            <span>· {presentCount(selected)}/{selected.attendees?.length ?? 0} present ({attendedRate(selected)}%)</span>
+          </div>
+          <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+            {(selected.attendees ?? []).map((a, i) => (
+              <div key={a.user.id + i} className="flex items-center gap-3 py-2">
+                <Avatar name={`${a.user.firstName} ${a.user.lastName}`} src={a.user.profilePic} size={32} />
+                <span className="flex-1 text-sm text-slate-700">{a.user.firstName} {a.user.lastName}</span>
+                <Badge tone={a.status === "Attended" ? "green" : a.status === "Excused" ? "amber" : "red"}>{a.status}</Badge>
+              </div>
+            ))}
+            {(selected.attendees ?? []).length === 0 && <p className="text-sm text-slate-400 py-4 text-center">No attendees recorded</p>}
+          </div>
+        </Modal>
+      )}
+    </Page>
   );
 }

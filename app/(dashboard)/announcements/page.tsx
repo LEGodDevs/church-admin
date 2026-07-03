@@ -1,140 +1,119 @@
 "use client";
-import { useEffect, useState } from "react";
-import Header from "@/components/layout/Header";
-import PageHeader from "@/components/ui/PageHeader";
-import { FullPageLoader } from "@/components/ui/LoadingSpinner";
-import { apiFetch, apiPost, apiDelete } from "@/lib/api";
-import { Announcement } from "@/types/api";
-import { useAuthStore } from "@/stores/auth-store";
-import { formatDate } from "@/lib/utils";
+import { useCallback, useState } from "react";
+import { Page } from "@/components/ui/Page";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Modal } from "@/components/ui/Modal";
+import { LoadingBlock, ErrorBlock, EmptyState } from "@/components/ui/States";
+import { api } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
+import { dateShort } from "@/lib/format";
+import type { AnnouncementType } from "@/types/api";
+
+const TYPE_TONE: Record<string, "slate" | "blue" | "amber"> = { general: "slate", event: "blue", goal: "amber" };
 
 export default function AnnouncementsPage() {
-  const { user } = useAuthStore();
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [deleting, setDeleting] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiFetch<Announcement[]>("/announcements")
-      .then(setAnnouncements)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
-    setSubmitting(true);
-    try {
-      const newAnn = await apiPost<Announcement>("/announcements", {
-        title: title.trim(),
-        content: content.trim(),
-        targetRoles: ["MEMBER", "SHEPHERD", "CELL_LEADER", "MC_HEAD", "BC_HEAD", "BRANCH_HEAD", "ZONE_LEADER", "BISHOP", "ADMIN"],
-      });
-      setAnnouncements((prev) => [newAnn, ...prev]);
-      setTitle("");
-      setContent("");
-      setShowForm(false);
-    } catch {}
-    setSubmitting(false);
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this announcement?")) return;
-    setDeleting(id);
-    try {
-      await apiDelete(`/announcements/${id}`);
-      setAnnouncements((prev) => prev.filter((a) => a.id !== id));
-    } catch {}
-    setDeleting(null);
-  };
+  const { data, loading, error, refetch } = useApi(useCallback(() => api.announcements(), []), []);
+  const [creating, setCreating] = useState(false);
 
   return (
-    <div className="flex flex-col flex-1">
-      <Header title="Announcements" subtitle="Publish updates to your congregation" />
-      <div className="flex-1 p-6 overflow-y-auto">
-        <PageHeader
-          title="Announcements"
-          subtitle={`${announcements.length} total`}
-          action={
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="px-5 py-2.5 rounded-xl text-white text-sm font-semibold"
-              style={{ background: "#121D55" }}
-            >
-              {showForm ? "Cancel" : "+ New Announcement"}
-            </button>
-          }
-        />
-
-        {/* Create form */}
-        {showForm && (
-          <form onSubmit={handleCreate} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-5">
-            <p className="font-semibold text-slate-700 mb-4">New Announcement</p>
-            <div className="space-y-3">
-              <input
-                type="text"
-                required
-                placeholder="Title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 outline-none focus:border-blue-400"
-              />
-              <textarea
-                required
-                rows={4}
-                placeholder="Write your announcement…"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-700 outline-none focus:border-blue-400 resize-none"
-              />
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-6 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-60"
-                style={{ background: "#121D55" }}
-              >
-                {submitting ? "Publishing…" : "Publish Announcement"}
-              </button>
-            </div>
-          </form>
-        )}
-
-        {loading ? <FullPageLoader /> : (
-          <div className="space-y-3">
-            {announcements.map((a) => (
-              <div key={a.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-                <div className="flex items-start gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-lg flex-shrink-0">📢</div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-slate-800 mb-1">{a.title}</h3>
-                    <p className="text-sm text-slate-500 leading-relaxed">{a.content}</p>
-                    <p className="text-xs text-slate-300 mt-2">
-                      {a.authorName ?? "You"} · {formatDate(a.createdAt)}
-                    </p>
-                  </div>
-                  {(user?.id === a.authorId || ["BISHOP", "ADMIN"].includes(user?.role ?? "")) && (
-                    <button
-                      onClick={() => handleDelete(a.id)}
-                      disabled={deleting === a.id}
-                      className="text-slate-300 hover:text-red-400 transition-colors text-sm flex-shrink-0 disabled:opacity-40"
-                    >
-                      🗑️
-                    </button>
-                  )}
-                </div>
+    <Page
+      title="Announcements"
+      subtitle={`${data?.length ?? 0} published`}
+      action={
+        <button onClick={() => setCreating(true)} className="px-4 py-2 rounded-xl bg-[#121D55] text-white text-sm font-medium hover:bg-[#1e2f7a]">
+          + New announcement
+        </button>
+      }
+    >
+      {loading ? (
+        <Card><LoadingBlock /></Card>
+      ) : error ? (
+        <Card><ErrorBlock message={error} onRetry={refetch} /></Card>
+      ) : (data?.length ?? 0) === 0 ? (
+        <Card><EmptyState icon="📢" title="No announcements yet" hint="Post one to reach your congregation." /></Card>
+      ) : (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {data!.map((a) => (
+            <Card key={a.id}>
+              {a.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={a.imageUrl} alt="" className="w-full h-36 object-cover rounded-xl mb-3" />
+              )}
+              <div className="flex items-center justify-between mb-2">
+                <Badge tone={TYPE_TONE[a.type ?? "general"]}>{a.type ?? "general"}</Badge>
+                <button
+                  onClick={async () => {
+                    if (confirm("Delete this announcement?")) {
+                      await api.deleteAnnouncement(a.id);
+                      refetch();
+                    }
+                  }}
+                  className="text-slate-300 hover:text-red-500 text-sm"
+                >
+                  🗑️
+                </button>
               </div>
-            ))}
-            {announcements.length === 0 && (
-              <div className="py-16 text-center text-slate-300 text-sm">No announcements yet. Create the first one!</div>
-            )}
-          </div>
-        )}
+              <p className="font-semibold text-slate-800 mb-1">{a.title}</p>
+              <p className="text-sm text-slate-500 line-clamp-3">{a.content}</p>
+              <p className="text-xs text-slate-400 mt-3">
+                {a.createdByUnit?.name ?? "Church"} · {dateShort(a.createdAt)}
+              </p>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {creating && <CreateModal onClose={() => setCreating(false)} onDone={() => { setCreating(false); refetch(); }} />}
+    </Page>
+  );
+}
+
+function CreateModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [type, setType] = useState<AnnouncementType>("general");
+  const [imageUrl, setImageUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async () => {
+    if (!title.trim() || !content.trim()) {
+      setErr("Title and content are required.");
+      return;
+    }
+    setSaving(true);
+    setErr("");
+    try {
+      await api.createAnnouncement({ title: title.trim(), content: content.trim(), type, imageUrl: imageUrl.trim() || undefined, isGeneral: true });
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to publish");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = "w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:border-[#121D55] focus:ring-2 focus:ring-[#121D55]/10";
+
+  return (
+    <Modal open onClose={onClose} title="New announcement">
+      <div className="space-y-4">
+        <input className={field} placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <textarea className={field} rows={5} placeholder="Write your message…" value={content} onChange={(e) => setContent(e.target.value)} />
+        <div className="flex gap-3">
+          <select className={field} value={type} onChange={(e) => setType(e.target.value as AnnouncementType)}>
+            <option value="general">General</option>
+            <option value="event">Event</option>
+            <option value="goal">Goal</option>
+          </select>
+          <input className={field} placeholder="Image URL (optional)" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
+        </div>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        <button onClick={submit} disabled={saving} className="w-full py-2.5 rounded-xl bg-[#121D55] text-white text-sm font-medium hover:bg-[#1e2f7a] disabled:opacity-60">
+          {saving ? "Publishing…" : "Publish announcement"}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

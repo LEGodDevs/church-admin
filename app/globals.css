@@ -28,3 +28,26 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── Org chart (organogram) — pure CSS connectors ── */
+.org-tree, .org-tree ul { position: relative; padding-top: 22px; display: flex; justify-content: center; }
+.org-tree ul { margin: 0; padding-left: 0; }
+.org-tree li {
+  list-style: none; text-align: center; position: relative;
+  padding: 22px 8px 0 8px;
+}
+.org-tree li::before, .org-tree li::after {
+  content: ''; position: absolute; top: 0; right: 50%;
+  border-top: 2px solid #dbe0ea; width: 50%; height: 22px;
+}
+.org-tree li::after { right: auto; left: 50%; border-left: 2px solid #dbe0ea; }
+.org-tree li:only-child::after, .org-tree li:only-child::before { display: none; }
+.org-tree li:only-child { padding-top: 0; }
+.org-tree li:first-child::before, .org-tree li:last-child::after { border: 0 none; }
+.org-tree li:last-child::before { border-right: 2px solid #dbe0ea; border-radius: 0 8px 0 0; }
+.org-tree li:first-child::after { border-radius: 8px 0 0 0; }
+.org-tree ul ul::before {
+  content: ''; position: absolute; top: 0; left: 50%;
+  border-left: 2px solid #dbe0ea; width: 0; height: 22px;
+}
+.org-tree > ul { padding-top: 0; }

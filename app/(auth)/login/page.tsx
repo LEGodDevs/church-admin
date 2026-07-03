@@ -64,9 +64,11 @@ export default function LoginPage() {
       const leadership = deriveLeadership(data.user.leaderships);
       const role = (leadership?.role ?? "MEMBER") as UserRole;
 
-      const allowedRoles: UserRole[] = ["BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD"];
+      const allowedRoles: UserRole[] = [
+        "BISHOP", "ADMIN", "ZONE_LEADER", "BRANCH_HEAD", "BC_HEAD", "MC_HEAD", "CELL_LEADER", "SHEPHERD",
+      ];
       if (!allowedRoles.includes(role)) {
-        throw new Error("This portal is for Branch Pastors and above. Please use the mobile app.");
+        throw new Error("This console is for church leaders. Members should use the mobile app.");
       }
 
       let unitName: string | undefined;
@@ -109,7 +111,7 @@ export default function LoginPage() {
       <div className="hidden lg:flex flex-col justify-between w-96 p-10" style={{ background: "var(--primary)" }}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-xl">✝️</div>
-          <span className="text-white font-bold text-lg">LC Church</span>
+          <span className="text-white font-bold text-lg">LE Church</span>
         </div>
         <div>
           <h2 className="text-white text-3xl font-bold leading-tight mb-4">
@@ -119,7 +121,7 @@ export default function LoginPage() {
             Manage your congregation, track attendance, monitor growth, and oversee your unit — all from one place.
           </p>
         </div>
-        <p className="text-white/30 text-xs">Branch Pastor · Zone Leader · Bishop</p>
+        <p className="text-white/30 text-xs">Shepherd · Cell Leader · Pastor · Zone · Bishop</p>
       </div>
 
       {/* Right panel */}
@@ -127,7 +129,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="flex items-center gap-2 mb-8 lg:hidden">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-lg" style={{ background: "var(--primary)" }}>✝️</div>
-            <span className="font-bold text-slate-800">LC Church Admin</span>
+            <span className="font-bold text-slate-800">LE Church Admin</span>
           </div>
 
           <h1 className="text-2xl font-bold text-slate-800 mb-1">Welcome back</h1>
@@ -188,7 +190,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-xs text-slate-400 mt-8">
-            For members, please use the LC Church mobile app.
+            For members, please use the LE Church mobile app.
           </p>
         </div>
       </div>

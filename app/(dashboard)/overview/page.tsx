@@ -1,210 +1,198 @@
 "use client";
-import { useEffect, useState } from "react";
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell
-} from "recharts";
-import Header from "@/components/layout/Header";
+import { useCallback } from "react";
+import Link from "next/link";
+import { Page } from "@/components/ui/Page";
+import { Card, CardHeader } from "@/components/ui/Card";
 import StatCard from "@/components/ui/StatCard";
-import PageHeader from "@/components/ui/PageHeader";
-import { FullPageLoader } from "@/components/ui/LoadingSpinner";
-import { apiFetch } from "@/lib/api";
-import { useAuthStore } from "@/stores/auth-store";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { ROLE_LABELS } from "@/types/auth";
-import { AdminDashboard, GeneralDashboard, AttendanceEvent, FinanceSummary, Announcement } from "@/types/api";
+import { Badge } from "@/components/ui/Badge";
+import { LoadingBlock, ErrorBlock, EmptyState } from "@/components/ui/States";
+import { AreaTrend, Donut, BarSeries, MultiLine, Gauge, CHART_COLORS } from "@/components/charts/Charts";
+import { api } from "@/lib/api";
+import { useApi } from "@/hooks/useApi";
+import { useScope } from "@/hooks/useScope";
+import { ghc, num, dateShort } from "@/lib/format";
+import {
+  monthlyFinance, financeByTypeSeries, attendanceTrend, evangelismTrend, memberGrowth,
+} from "@/lib/analytics";
+import type {
+  AdminDashboard, GeneralDashboard, FinanceSummary, AttendanceEvent, EvangelismRecord, Member, Report,
+} from "@/types/api";
 
-const PRIMARY = "#121D55";
-const PIE_COLORS = [PRIMARY, "#3B82F6", "#10B981", "#F59E0B", "#8B5CF6"];
+interface Bundle {
+  admin: AdminDashboard | null;
+  unit: GeneralDashboard | null;
+  finance: FinanceSummary | null;
+  sessions: AttendanceEvent[];
+  evangelism: EvangelismRecord[];
+  members: Member[];
+  reports: Report[];
+}
 
 export default function OverviewPage() {
-  const { user } = useAuthStore();
-  const [loading, setLoading] = useState(true);
-  const [adminStats, setAdminStats] = useState<AdminDashboard | null>(null);
-  const [unitStats, setUnitStats] = useState<GeneralDashboard | null>(null);
-  const [sessions, setSessions] = useState<AttendanceEvent[]>([]);
-  const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const { unitId, unitName, isAdmin, user } = useScope();
 
-  const isAdmin = user?.role === "BISHOP" || user?.role === "ADMIN";
+  const load = useCallback(async (): Promise<Bundle> => {
+    if (!unitId) throw new Error("No unit assigned to your account.");
+    const settle = <T,>(p: Promise<T>, fb: T): Promise<T> => p.catch(() => fb);
+    const [admin, unit, finance, sessions, evangelism, members, reports] = await Promise.all([
+      isAdmin ? settle(api.adminDashboard(), null) : Promise.resolve(null),
+      !isAdmin ? settle(api.unitDashboard(unitId), null) : Promise.resolve(null),
+      settle(api.unitFinance(unitId), null),
+      settle(api.unitSessions(unitId), []),
+      settle(api.evangelism(unitId), []),
+      isAdmin ? settle(api.users(), []) : Promise.resolve([]),
+      settle(api.incomingReports(unitId), []),
+    ]);
+    return { admin, unit, finance, sessions, evangelism, members, reports };
+  }, [unitId, isAdmin]);
 
-  useEffect(() => {
-    if (!user) return;
+  const { data, loading, error, refetch } = useApi(load, [unitId, isAdmin]);
 
-    const dashboardRequest = isAdmin
-      ? apiFetch<AdminDashboard>("/analytics/admin/dashboard").catch(() => null)
-      : user.unitId
-        ? apiFetch<GeneralDashboard>(`/analytics/${user.unitId}/dashboard`).catch(() => null)
-        : Promise.resolve(null);
+  if (loading) return <Page title="Overview"><LoadingBlock /></Page>;
+  if (error) return <Page title="Overview"><ErrorBlock message={error} onRetry={refetch} /></Page>;
+  if (!data) return null;
 
-    const sessionsRequest = user.unitId
-      ? apiFetch<AttendanceEvent[]>(`/attendance/unit/${user.unitId}/sessions?includeDescendants=true`).catch(() => [] as AttendanceEvent[])
-      : Promise.resolve([] as AttendanceEvent[]);
+  const { admin, unit, finance, sessions, evangelism, members, reports } = data;
 
-    const financeRequest = user.unitId
-      ? apiFetch<FinanceSummary>(`/finances/unit/${user.unitId}/summary?includeDescendants=true`).catch(() => null)
-      : Promise.resolve(null);
+  // Normalize KPIs across admin vs unit dashboards
+  const totalMembers = admin?.totalMembers ?? unit?.totalMembers ?? 0;
+  const monthlyGiving = admin?.monthlyGiving ?? unit?.totalFinances ?? finance?.summary.total ?? 0;
+  const attendanceRate = admin?.attendanceRate ?? 0;
+  const soulsWon = evangelism.reduce((s, e) => s + (e.soulsWon || 0), 0) || unit?.totalSoulsWon || 0;
+  const firstTimers = admin?.firstTimersThisMonth ?? 0;
+  const upcoming = unit?.upcomingEvents ?? sessions.filter((s) => new Date(s.date) > new Date()).length;
 
-    Promise.all([
-      dashboardRequest,
-      sessionsRequest,
-      financeRequest,
-      apiFetch<Announcement[]>("/announcements").catch(() => [] as Announcement[]),
-    ]).then(([stats, s, f, a]) => {
-      if (isAdmin) setAdminStats(stats as AdminDashboard | null);
-      else setUnitStats(stats as GeneralDashboard | null);
-      setSessions(s);
-      setFinanceSummary(f);
-      setAnnouncements(a);
-    }).finally(() => setLoading(false));
-  }, [user, isAdmin]);
+  const givingSeries = monthlyFinance(finance?.recentRecords ?? []);
+  const typeSeries = financeByTypeSeries(finance?.summary.byType ?? {});
+  const attSeries = attendanceTrend(sessions);
+  const evaSeries = evangelismTrend(evangelism);
+  const growthSeries = memberGrowth(members);
 
-  // Attendance chart — last 6 sessions, oldest to newest
-  const attendanceChart = sessions.slice(0, 6).slice().reverse().map((s) => {
-    const present = (s.attendees ?? []).filter((a) => a.status === "Attended").length;
-    const total = s._count?.attendees ?? (s.attendees?.length ?? 0);
-    return {
-      name: formatDate(s.date).slice(0, 6),
-      Present: present,
-      Absent: Math.max(total - present, 0),
-    };
-  });
-
-  // Giving breakdown by type
-  const givingsChart = financeSummary
-    ? Object.entries(financeSummary.summary.byType).map(([name, value]) => ({ name, value }))
-    : [];
-
-  // Giving trend by month from recent records
-  const givingByMonth = (financeSummary?.recentRecords ?? []).reduce<Record<string, number>>((acc, r) => {
-    const mo = new Date(r.date).toLocaleString("en", { month: "short" });
-    acc[mo] = (acc[mo] ?? 0) + r.amount;
-    return acc;
-  }, {});
-  const givingTrendChart = Object.entries(givingByMonth).slice(-6).map(([name, value]) => ({ name, value }));
-
-  if (loading) return (
-    <div className="flex flex-col flex-1">
-      <Header title="Overview" subtitle={user ? `${ROLE_LABELS[user.role]} Dashboard` : ""} />
-      <FullPageLoader />
-    </div>
-  );
+  const recentReports = admin?.recentReports ?? reports.slice(0, 5);
 
   return (
-    <div className="flex flex-col flex-1">
-      <Header title="Overview" subtitle={user ? `${ROLE_LABELS[user.role]} Dashboard${user.unitName ? ` · ${user.unitName}` : ""}` : ""} />
-      <div className="flex-1 p-6 overflow-y-auto">
-        <PageHeader title="Dashboard Overview" subtitle={`Welcome back${user ? `, ${user.firstName}` : ""}! Here's what's happening.`} />
-
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          {isAdmin ? (
-            <>
-              <StatCard label="Total Members" value={adminStats?.totalMembers ?? 0} icon="👥" color={PRIMARY} />
-              <StatCard label="Attendance Rate" value={`${adminStats?.attendanceRate ?? 0}%`} icon="✅" color="#10B981"
-                delta={(adminStats?.attendanceRate ?? 0) >= 70 ? "Good" : "Low"} deltaPositive={(adminStats?.attendanceRate ?? 0) >= 70} />
-              <StatCard label="Monthly Giving" value={formatCurrency(adminStats?.monthlyGiving ?? 0)} icon="💰" color="#F59E0B" />
-              <StatCard label="New Members" value={adminStats?.newMembersThisMonth ?? 0} icon="🌱" color="#8B5CF6"
-                delta={`${adminStats?.firstTimersThisMonth ?? 0} first-timers`} deltaPositive />
-            </>
-          ) : (
-            <>
-              <StatCard label="Total Members" value={unitStats?.totalMembers ?? 0} icon="👥" color={PRIMARY} />
-              <StatCard label="Total Finances" value={formatCurrency(unitStats?.totalFinances ?? 0)} icon="💰" color="#F59E0B" />
-              <StatCard label="Souls Won" value={unitStats?.totalSoulsWon ?? 0} icon="🙏" color="#10B981" />
-              <StatCard label="Upcoming Events" value={unitStats?.upcomingEvents ?? 0} icon="📅" color="#3B82F6" />
-            </>
-          )}
-        </div>
-
-        {/* Charts row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-          {/* Attendance chart */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <p className="font-semibold text-slate-700 mb-4">Attendance (Last 6 Sessions)</p>
-            {attendanceChart.length > 0 ? (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={attendanceChart}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <Tooltip />
-                  <Bar dataKey="Present" fill={PRIMARY} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="Absent" fill="#FCA5A5" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-48 flex items-center justify-center text-slate-300 text-sm">No attendance data yet</div>
-            )}
-          </div>
-
-          {/* Giving trend */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <p className="font-semibold text-slate-700 mb-4">Giving Trend</p>
-            {givingTrendChart.length > 0 ? (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={givingTrendChart}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#94a3b8" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} tickFormatter={(v) => `₵${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(v) => typeof v === "number" ? formatCurrency(v) : ""} />
-                  <Bar dataKey="value" fill={PRIMARY} radius={[4, 4, 0, 0]} name="Giving" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-48 flex items-center justify-center text-slate-300 text-sm">No giving data yet</div>
-            )}
-          </div>
-        </div>
-
-        {/* Givings breakdown + Recent announcements */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Givings breakdown */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <p className="font-semibold text-slate-700 mb-4">Giving Breakdown</p>
-            {givingsChart.length > 0 ? (
-              <div className="flex items-center gap-6">
-                <PieChart width={120} height={120}>
-                  <Pie data={givingsChart} cx={55} cy={55} innerRadius={35} outerRadius={55} dataKey="value" paddingAngle={2}>
-                    {givingsChart.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                  </Pie>
-                </PieChart>
-                <div className="flex-1">
-                  {givingsChart.map((item, i) => (
-                    <div key={i} className="flex items-center gap-2 mb-2">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                      <span className="text-xs text-slate-600 flex-1">{item.name}</span>
-                      <span className="text-xs font-semibold text-slate-700">{formatCurrency(item.value)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="h-32 flex items-center justify-center text-slate-300 text-sm">No giving records yet</div>
-            )}
-          </div>
-
-          {/* Recent announcements */}
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <p className="font-semibold text-slate-700 mb-4">Recent Announcements</p>
-            {announcements.length > 0 ? (
-              <div className="space-y-3">
-                {announcements.slice(0, 3).map((a) => (
-                  <div key={a.id} className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-sm flex-shrink-0">📢</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-700 truncate">{a.title}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{formatDate(a.createdAt)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="h-32 flex items-center justify-center text-slate-300 text-sm">No announcements yet</div>
-            )}
-          </div>
-        </div>
+    <Page
+      title={`Welcome, ${user?.firstName ?? "Leader"}`}
+      subtitle={isAdmin ? "Church-wide performance at a glance" : `${unitName ?? "Your unit"} · performance overview`}
+      action={
+        <Link href="/organogram" className="px-4 py-2 rounded-xl bg-[#121D55] text-white text-sm font-medium hover:bg-[#1e2f7a]">
+          View Organogram →
+        </Link>
+      }
+    >
+      {/* KPI row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+        <StatCard label="Total Members" value={num(totalMembers)} icon="👥" color="#121D55"
+          sub={isAdmin ? `${num(admin?.newMembersThisMonth ?? 0)} new this month` : undefined} />
+        <StatCard label="Monthly Giving" value={ghc(monthlyGiving)} icon="💰" color="#059669" />
+        <StatCard label="Attendance Rate" value={`${attendanceRate}%`} icon="✅" color="#7c3aed" />
+        <StatCard label="Souls Won" value={num(soulsWon)} icon="🌍" color="#d97706"
+          sub={`${num(firstTimers)} first-timers this month`} />
       </div>
-    </div>
+
+      {/* Charts row 1 */}
+      <div className="grid lg:grid-cols-3 gap-5 mb-5">
+        <Card className="lg:col-span-2">
+          <CardHeader title="Giving trend" subtitle="Total contributions over the last 6 months" />
+          {givingSeries.some((d) => d.total > 0) ? (
+            <AreaTrend data={givingSeries} xKey="month" yKey="total" color="#059669" format={(v) => ghc(v)} />
+          ) : (
+            <EmptyState icon="💸" title="No giving records yet" />
+          )}
+        </Card>
+        <Card>
+          <CardHeader title="Giving by type" subtitle="Distribution this period" />
+          {typeSeries.length > 0 ? (
+            <Donut data={typeSeries} format={(v) => ghc(v)} />
+          ) : (
+            <EmptyState icon="📊" title="No data" />
+          )}
+        </Card>
+      </div>
+
+      {/* Charts row 2 */}
+      <div className="grid lg:grid-cols-3 gap-5 mb-5">
+        <Card>
+          <CardHeader title="Attendance rate" subtitle="Present share by month" />
+          {attSeries.some((d) => d.rate > 0) ? (
+            <BarSeries data={attSeries} xKey="month" yKey="rate" color="#7c3aed" format={(v) => `${v}%`} />
+          ) : (
+            <EmptyState icon="🪑" title="No attendance yet" />
+          )}
+        </Card>
+        <Card>
+          <CardHeader title="Evangelism" subtitle="Souls won vs people reached" />
+          {evaSeries.some((d) => d.reached > 0 || d.souls > 0) ? (
+            <MultiLine
+              data={evaSeries}
+              xKey="month"
+              lines={[
+                { key: "reached", label: "Reached", color: CHART_COLORS[1] },
+                { key: "souls", label: "Souls won", color: CHART_COLORS[3] },
+              ]}
+            />
+          ) : (
+            <EmptyState icon="🌱" title="No outreach records" />
+          )}
+        </Card>
+        {isAdmin ? (
+          <Card>
+            <CardHeader title="Membership growth" subtitle="Cumulative members" />
+            <AreaTrend data={growthSeries} xKey="month" yKey="total" color="#121D55" />
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader title="Attendance health" subtitle="Overall present rate" />
+            <Gauge value={attendanceRate} label="present" color="#7c3aed" />
+          </Card>
+        )}
+      </div>
+
+      {/* Bottom: quick counts + recent reports */}
+      <div className="grid lg:grid-cols-3 gap-5">
+        <Card>
+          <CardHeader title="At a glance" />
+          <div className="space-y-3">
+            {[
+              { label: "Upcoming events", value: num(upcoming), icon: "📅" },
+              { label: "Zones", value: num(admin?.totalZones ?? unit?.totalSubUnits ?? 0), icon: "🗺️" },
+              { label: "Branches", value: num(admin?.totalBranches ?? 0), icon: "🏛️" },
+              { label: "People reached", value: num(evangelism.reduce((s, e) => s + (e.peopleReached || 0), 0)), icon: "📣" },
+            ].map((r) => (
+              <div key={r.label} className="flex items-center justify-between">
+                <span className="text-sm text-slate-500 flex items-center gap-2">
+                  <span>{r.icon}</span>
+                  {r.label}
+                </span>
+                <span className="text-sm font-semibold text-slate-800">{r.value}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Recent reports"
+            subtitle="Latest submissions from your units"
+            action={<Link href="/reports" className="text-xs font-medium text-[#121D55] hover:underline">View all</Link>}
+          />
+          {recentReports.length === 0 ? (
+            <EmptyState icon="📋" title="No reports yet" />
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {recentReports.map((r) => (
+                <div key={r.id} className="flex items-center justify-between py-2.5">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{r.title}</p>
+                    <p className="text-xs text-slate-400">{r.unit?.name ?? "—"} · {dateShort(r.submittedAt)}</p>
+                  </div>
+                  <Badge tone={r.status === "reviewed" ? "green" : "amber"}>{r.status}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+    </Page>
   );
 }
