@@ -42,3 +42,7 @@ next-env.d.ts
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+
+# Cross-platform native/wasm deps (sharp, @tailwindcss/oxide) make a Windows-generated
+# lock drift from Railway's Linux resolve; let the server 'npm install' instead.
+package-lock.json
