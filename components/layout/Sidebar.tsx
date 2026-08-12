@@ -37,6 +37,7 @@ const NAV: NavGroup[] = [
     heading: "Activity",
     items: [
       { href: "/attendance", label: "Attendance", icon: "✅" },
+      { href: "/cell-reports", label: "Cell Reports", icon: "🏠" },
       { href: "/events", label: "Events", icon: "📅" },
       { href: "/finances", label: "Finances", icon: "💰" },
       { href: "/goals", label: "Goals", icon: "🎯" },
